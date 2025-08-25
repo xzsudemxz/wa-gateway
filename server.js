@@ -1,4 +1,4 @@
-// ====== server.js (pronto pra colar) ======
+// ===== server.js =====
 import express from "express";
 import cors from "cors";
 import fs from "fs";
@@ -6,10 +6,14 @@ import path from "path";
 import * as QR from "qrcode";
 import pino from "pino";
 
-// --- Baileys (compatível com default e named export) ---
-import * as baileys from "@whiskeysockets/baileys";
-const { useMultiFileAuthState, fetchLatestBaileysVersion } = baileys;
-const makeWASocket = baileys.default || baileys.makeWASocket; // <- AQUI a correção
+// Baileys — compatível com default OU named exports
+import pkg from "@whiskeysockets/baileys";
+const makeWASocket =
+  typeof pkg?.makeWASocket === "function"
+    ? pkg.makeWASocket
+    : (typeof pkg?.default === "function" ? pkg.default : undefined);
+
+const { useMultiFileAuthState, fetchLatestBaileysVersion } = pkg;
 
 const app = express();
 app.use(express.json());
@@ -20,7 +24,7 @@ const SECRET  = process.env.WA_GATEWAY_SECRET || "change-me"; // defina no Rende
 const AUTH_DIR = process.env.WA_AUTH_DIR || "/tmp/wa_auth";
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-// Clientes ativos em memória
+// Guarda sockets por corretor
 const clients = new Map();
 
 // Auth simples via header
@@ -30,19 +34,23 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// Raiz (só pra não ver "Cannot GET /")
+// Raiz (pra não dar "Cannot GET /")
 app.get("/", (req, res) => {
-  res.send("WA Gateway online. Use /health ou /session/*");
+  res.send("WA Gateway online. Use /health e /session/*");
 });
 
 // Health
 app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// Cria/abre sessão e retorna QR (dataURL) ou "connected"
+// Iniciar sessão (gera QR ou já retorna connected)
 app.post("/session/start", requireAuth, async (req, res) => {
   try {
     const userId = String(req.header("x-user-id") || req.body.userId || "");
     if (!userId) return res.status(400).json({ ok: false, message: "missing userId" });
+
+    if (typeof makeWASocket !== "function") {
+      return res.status(500).json({ ok: false, message: "makeWASocket is not a function" });
+    }
 
     const userAuthPath = path.join(AUTH_DIR, userId);
     fs.mkdirSync(userAuthPath, { recursive: true });
@@ -63,7 +71,7 @@ app.post("/session/start", requireAuth, async (req, res) => {
 
     let responded = false;
     const done = (code, body) => { if (!responded) { responded = true; res.status(code).json(body); } };
-    const timer = setTimeout(() => done(504, { ok: false, message: "timeout waiting QR/connection" }), 15000);
+    const timer = setTimeout(() => done(504, { ok: false, message: "timeout waiting QR/connection" }), 20000);
 
     sock.ev.on("connection.update", async (u) => {
       try {
@@ -90,7 +98,7 @@ app.post("/session/start", requireAuth, async (req, res) => {
   }
 });
 
-// Status da sessão
+// Status
 app.get("/session/status", requireAuth, (req, res) => {
   const userId = String(req.header("x-user-id") || req.query.userId || "");
   const sock = clients.get(userId);
@@ -109,5 +117,4 @@ app.post("/session/logout", requireAuth, async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("WA Gateway ON:", PORT));
-// ====== fim do server.js ======
-
+// ===== fim server.js =====
