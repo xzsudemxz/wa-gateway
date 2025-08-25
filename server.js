@@ -1,37 +1,44 @@
+// ====== server.js (pronto pra colar) ======
 import express from "express";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
-import makeWASocket, {
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion
-} from "@whiskeysockets/baileys";
-import pino from "pino";
 import * as QR from "qrcode";
+import pino from "pino";
+
+// --- Baileys (compatível com default e named export) ---
+import * as baileys from "@whiskeysockets/baileys";
+const { useMultiFileAuthState, fetchLatestBaileysVersion } = baileys;
+const makeWASocket = baileys.default || baileys.makeWASocket; // <- AQUI a correção
 
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*" }));
 
-// ----- config -----
+// ----- Config -----
 const SECRET  = process.env.WA_GATEWAY_SECRET || "change-me"; // defina no Render!
 const AUTH_DIR = process.env.WA_AUTH_DIR || "/tmp/wa_auth";
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-// clientes ativos em memória
+// Clientes ativos em memória
 const clients = new Map();
 
-// auth simples via header
+// Auth simples via header
 function requireAuth(req, res, next) {
   const s = req.header("x-wa-secret");
   if (s !== SECRET) return res.status(401).json({ ok: false, message: "unauthorized" });
   next();
 }
 
-// health
+// Raiz (só pra não ver "Cannot GET /")
+app.get("/", (req, res) => {
+  res.send("WA Gateway online. Use /health ou /session/*");
+});
+
+// Health
 app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// cria/abre sessão e retorna QR (dataURL) ou "connected"
+// Cria/abre sessão e retorna QR (dataURL) ou "connected"
 app.post("/session/start", requireAuth, async (req, res) => {
   try {
     const userId = String(req.header("x-user-id") || req.body.userId || "");
@@ -83,7 +90,7 @@ app.post("/session/start", requireAuth, async (req, res) => {
   }
 });
 
-// status
+// Status da sessão
 app.get("/session/status", requireAuth, (req, res) => {
   const userId = String(req.header("x-user-id") || req.query.userId || "");
   const sock = clients.get(userId);
@@ -91,7 +98,7 @@ app.get("/session/status", requireAuth, (req, res) => {
   return res.json({ ok: true, status: "disconnected" });
 });
 
-// logout
+// Logout
 app.post("/session/logout", requireAuth, async (req, res) => {
   const userId = String(req.header("x-user-id") || req.body.userId || "");
   const sock = clients.get(userId);
@@ -102,3 +109,5 @@ app.post("/session/logout", requireAuth, async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("WA Gateway ON:", PORT));
+// ====== fim do server.js ======
+
